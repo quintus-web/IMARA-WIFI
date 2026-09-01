@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>Hotspot Router Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== MAP (fills the screen) ===== -->
+<div id="map"></div>
+
+<!-- ===== Top search bar ===== -->
+<div id="topBar">
+  <div id="searchWrap">
+    <span class="search-icon">🔍</span>
+    <input id="searchInput" type="text" placeholder="Search routers" enterkeyhint="search" autocomplete="off">
+    <button id="searchClearBtn" class="search-clear hidden" aria-label="Clear search">✕</button>
+  </div>
+  <button id="moreBtn" class="icon-btn" aria-label="More options">⋯</button>
+</div>
+
+<!-- ===== "Tap the map" hint pill (shown while the Add/Edit sheet is minimized) ===== -->
+<div id="placingHint" class="placing-hint hidden">
+  <span>📍 Tap the map to place the router</span>
+  <button id="cancelPlacingBtn">Cancel</button>
+</div>
+
+<!-- ===== Floating "use my location" button ===== -->
+<button id="locateFab" class="fab" aria-label="Use my location">📍</button>
+
+<!-- ===== Bottom navigation ===== -->
+<nav id="bottomNav">
+  <button class="nav-btn active" data-tab="map">
+    <span class="nav-icon">🗺️</span><span class="nav-label">Map</span>
+  </button>
+  <button class="nav-btn" data-tab="routers">
+    <span class="nav-icon">📋</span><span class="nav-label">Routers</span>
+  </button>
+  <button class="nav-btn" data-tab="add">
+    <span class="nav-icon">➕</span><span class="nav-label">Add</span>
+  </button>
+</nav>
+
+<!-- ===== Backdrop behind bottom sheets ===== -->
+<div id="sheetBackdrop" class="hidden"></div>
+
+<!-- ===== Routers list bottom sheet ===== -->
+<div id="routersSheet" class="sheet" aria-hidden="true">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h2>Routers <span id="routerCount" class="count-badge">0</span></h2>
+    <button class="sheet-close" data-close aria-label="Close">✕</button>
+  </div>
+  <div class="sheet-search">
+    <input id="listSearchInput" type="text" placeholder="Search routers..." autocomplete="off">
+  </div>
+  <div id="routerList" class="router-list"></div>
+</div>
+
+<!-- ===== Router info bottom sheet ===== -->
+<div id="infoSheet" class="sheet" aria-hidden="true">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h2 id="infoId">R00</h2>
+    <button class="sheet-close" data-close aria-label="Close">✕</button>
+  </div>
+  <div class="info-body">
+    <div id="infoModel" class="info-model"></div>
+    <div id="infoStatus" class="info-status"></div>
+    <div class="info-label">Notes</div>
+    <div id="infoNotes" class="info-notes"></div>
+    <div id="infoCoords" class="info-coords"></div>
+
+    <button id="navigateBtn" class="btn btn-primary btn-block">🧭 Navigate</button>
+    <div class="btn-row">
+      <button id="infoEditBtn" class="btn btn-secondary">✏️ Edit</button>
+      <button id="infoDeleteBtn" class="btn btn-danger">🗑️ Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Add / Edit router bottom sheet ===== -->
+<div id="formSheet" class="sheet" aria-hidden="true">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h2 id="formTitle">Add Router</h2>
+    <button class="sheet-close" data-close aria-label="Close">✕</button>
+  </div>
+
+  <form id="routerForm">
+    <label>
+      Router ID
+      <input type="text" id="fieldId" placeholder="e.g. R01" required>
+    </label>
+
+    <label>
+      Model
+      <input type="text" id="fieldModel" placeholder="e.g. Tenda F6" required>
+    </label>
+
+    <div class="field-group">
+      <span class="field-label">Status</span>
+      <div class="status-picker" id="statusPicker">
+        <button type="button" class="status-opt active" data-status="active">🟢 Active</button>
+        <button type="button" class="status-opt" data-status="offline">🔴 Offline</button>
+        <button type="button" class="status-opt" data-status="problem">🟠 Problem</button>
+      </div>
+    </div>
+
+    <div class="field-group">
+      <span class="field-label">Location</span>
+      <div class="location-buttons">
+        <button type="button" id="useLocationForFormBtn" class="btn btn-secondary">📍 Use My Location</button>
+        <button type="button" id="tapMapBtn" class="btn btn-secondary">🗺️ Tap Location on Map</button>
+      </div>
+      <div class="location-preview" id="locationPreview">No location selected yet</div>
+    </div>
+
+    <label>
+      Notes
+      <textarea id="fieldNotes" rows="2" placeholder="e.g. Installed at the shop"></textarea>
+    </label>
+
+    <div class="form-buttons">
+      <button type="button" id="cancelFormBtn" class="btn btn-ghost">Cancel</button>
+      <button type="submit" id="saveRouterBtn" class="btn btn-primary" disabled>Save Router</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== More / settings bottom sheet ===== -->
+<div id="settingsSheet" class="sheet" aria-hidden="true">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <h2>More</h2>
+    <button class="sheet-close" data-close aria-label="Close">✕</button>
+  </div>
+  <div class="settings-body">
+    <button id="exportBtn" class="btn btn-ghost btn-block">⬇️ Export Data (JSON)</button>
+    <button id="importBtn" class="btn btn-ghost btn-block">⬆️ Import Data (JSON)</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    <p class="settings-note">Router data is saved only in this browser. Export regularly to back it up.</p>
+  </div>
+</div>
+
+<!-- ===== Confirm Delete ===== -->
+<div id="confirmOverlay" class="overlay hidden">
+  <div class="confirm-card">
+    <p id="confirmText">Delete this router?</p>
+    <div class="form-buttons">
+      <button id="confirmCancelBtn" class="btn btn-ghost">Cancel</button>
+      <button id="confirmDeleteBtn" class="btn btn-danger">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Multiple search matches list ===== -->
+<div id="searchMatchesOverlay" class="overlay hidden">
+  <div class="form-card">
+    <h2>Matching routers</h2>
+    <div id="searchMatchesList" class="router-list"></div>
+    <div class="form-buttons">
+      <button id="closeSearchMatchesBtn" class="btn btn-ghost">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="app.js"></script>
+</body>
+</html>
