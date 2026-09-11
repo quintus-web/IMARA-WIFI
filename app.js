@@ -343,55 +343,97 @@
     );
   });
 
-  // ============================================================
-  // TEMPORARY PLACING MARKER
-  // ============================================================
-
   function showPlacingMarker(latlng) {
-    if (placingMarker) {
-      placingMarker.setLatLng(latlng);
-      return;
-    }
-
-    placingMarker = L.marker(latlng, {
-      icon: L.divIcon({
-        className: "",
-        html:
-          '<div class="router-marker">📍</div>',
-        iconSize: [32, 32],
-        iconAnchor: [16, 30]
-      })
-    }).addTo(map);
+  if (placingMarker) {
+    placingMarker.setLatLng(latlng);
+    return;
   }
 
-  function clearPlacingMarker() {
-    if (placingMarker) {
-      map.removeLayer(placingMarker);
-      placingMarker = null;
-    }
-  }
+  placingMarker = L.marker(latlng, {
+    icon: L.divIcon({
+      className: "",
+
+      html:
+        '<div class="router-marker placing">' +
+        '<span class="router-center"></span>' +
+        '<svg class="router-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+        '<path d="M3 9.5C8.5 5.2 15.5 5.2 21 9.5" stroke="white" stroke-width="2" stroke-linecap="round"/>' +
+        '<path d="M6.5 13C10.5 9.9 13.5 9.9 17.5 13" stroke="white" stroke-width="2" stroke-linecap="round"/>' +
+        '<path d="M10 16.5C11.4 15.4 12.6 15.4 14 16.5" stroke="white" stroke-width="2" stroke-linecap="round"/>' +
+        '<circle cx="12" cy="19.5" r="1.5" fill="white"/>' +
+        "</svg>" +
+        "</div>",
+
+      iconSize: [36, 44],
+
+      iconAnchor: [18, 42]
+    })
+  }).addTo(map);
+}
 
   // ============================================================
   // ROUTER MARKER
   // ============================================================
 
-  function iconFor(status) {
-    const info =
-      STATUS[status] || STATUS.active;
+ function iconFor(status) {
+  const safeStatus =
+    STATUS[status]
+      ? status
+      : "active";
 
-    return L.divIcon({
-      className: "",
+  const wifiIcon = `
+    <svg
+      class="router-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M3 9.5C8.5 5.2 15.5 5.2 21 9.5"
+        stroke="white"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+      <path
+        d="M6.5 13C10.5 9.9 13.5 9.9 17.5 13"
+        stroke="white"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+      <path
+        d="M10 16.5C11.4 15.4 12.6 15.4 14 16.5"
+        stroke="white"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+      <circle
+        cx="12"
+        cy="19.5"
+        r="1.5"
+        fill="white"
+      />
+    </svg>
+  `;
 
-      html:
-        '<div class="router-marker">' +
-        info.emoji +
-        "</div>",
+  return L.divIcon({
+    className: "",
 
-      iconSize: [34, 34],
+    html:
+      '<div class="router-marker ' +
+      safeStatus +
+      '">' +
+      '<span class="router-center"></span>' +
+      wifiIcon +
+      "</div>",
 
-      iconAnchor: [17, 30]
-    });
-  }
+    iconSize: [36, 44],
+
+    iconAnchor: [18, 42],
+
+    popupAnchor: [0, -42]
+  });
+}
 
   // ============================================================
   // RENDER EVERYTHING

@@ -546,13 +546,78 @@ button{ font-family: inherit; }
 .confirm-card p{ font-size: 14px; margin: 0 0 16px; }
 
 /* ============================================================
-   Router markers (larger, easier to tap)
+   Router map pins
    ============================================================ */
-.router-marker{
-  font-size: 32px;
-  line-height: 1;
-  text-align: center;
-  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.55));
+
+.router-marker {
+  width: 36px;
+  height: 44px;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.42));
+  cursor: pointer;
+}
+
+.router-marker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--marker-color, #2fbf6c);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.25),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.router-marker .router-icon {
+  position: relative;
+  z-index: 2;
+  width: 17px;
+  height: 17px;
+  margin-top: 7px;
+  display: block;
+  color: white;
+  transform: none;
+}
+
+/* Status colours */
+
+.router-marker.active {
+  --marker-color: var(--ok);
+}
+
+.router-marker.offline {
+  --marker-color: var(--off);
+}
+
+.router-marker.problem {
+  --marker-color: var(--warn);
+}
+
+/* Small white center */
+
+.router-marker .router-center {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  left: 9px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+/* Temporary location marker */
+
+.router-marker.placing {
+  --marker-color: var(--accent);
 }
 
 /* ============================================================
