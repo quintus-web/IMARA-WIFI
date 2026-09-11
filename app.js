@@ -1,452 +1,266 @@
-/* =========================================================
-   HOTSPOT ROUTER MAP
+/* ============================================================
+   Hotspot Router Map — app.js
    Supabase-connected version
-   ========================================================= */
+   ============================================================ */
 
-/* =========================================================
-   1. SUPABASE CONFIGURATION
-   ========================================================= */
+(function () {
+  "use strict";
 
-const SUPABASE_URL = "https://wifvdrspsjqbslxtjqok.supabase.co";
+  // ============================================================
+  // SUPABASE CONFIG
+  // ============================================================
 
-/*
-   IMPORTANT:
-   This is the PUBLIC/PUBLISHABLE key.
-   Never put the sb_secret_... key in this file.
-*/
-const SUPABASE_PUBLISHABLE_KEY =
-  "sb_publishable_Bs9HS7VNXvZ2ns5eKVDV-A_Rjy72VAR";
+  const SUPABASE_URL = "https://wifvdrspsjqbslxtjqok.supabase.co";
 
-const supabaseClient = window.supabase
-  ? window.supabase.createClient(
-      SUPABASE_URL,
-      SUPABASE_PUBLISHABLE_KEY
-    )
-  : null;
+  // IMPORTANT:
+  // This is the publishable/anon key.
+  // NEVER put the Supabase secret/service_role key here.
+  const SUPABASE_PUBLISHABLE_KEY =
+    "sb_publishable_Bs9HS7VNXvZ2ns5eKVDV-A_Rjy72VAR";
 
+  const supabaseClient =
+    window.supabase &&
+    typeof window.supabase.createClient === "function"
+      ? window.supabase.createClient(
+          SUPABASE_URL,
+          SUPABASE_PUBLISHABLE_KEY
+        )
+      : null;
 
-/* =========================================================
-   2. APP CONFIGURATION
-   ========================================================= */
+  // ============================================================
+  // CONSTANTS
+  // ============================================================
 
-const STORAGE_KEY = "hotspotRouterMap.routers";
+  const STORAGE_KEY = "hotspotRouterMap.routers";
 
-const DEFAULT_ROUTERS = [];
+  const STATUS = {
+    active: {
+      label: "Active",
+      emoji: "🟢",
+      color: "#2fbf6c"
+    },
 
-const STATUS = {
-  active: {
-    label: "Active",
-    emoji: "🟢",
-    color: "#2fbf6c"
-  },
+    offline: {
+      label: "Offline",
+      emoji: "🔴",
+      color: "#e5484d"
+    },
 
-  offline: {
-    label: "Offline",
-    emoji: "🔴",
-    color: "#e5484d"
-  },
+    problem: {
+      label: "Problem",
+      emoji: "🟠",
+      color: "#f2934b"
+    }
+  };
 
-  problem: {
-    label: "Problem",
-    emoji: "🟠",
-    color: "#f2934b"
-  }
-};
+  const DEFAULT_ROUTERS = [
+    {
+      id: "R01",
+      model: "Tenda F6",
+      lat: -1.2345,
+      lng: 36.8765,
+      status: "active",
+      notes: "Installed at the shop"
+    }
+  ];
 
+  // ============================================================
+  // STATE
+  // ============================================================
 
-/* =========================================================
-   3. APPLICATION STATE
-   ========================================================= */
+  let routers = loadLocalRouters();
 
-let routers = [];
+  let markers = {};
 
-let map = null;
+  let editingId = null;
 
-let markersLayer = null;
+  let pendingLatLng = null;
 
-let currentRouterId = null;
+  let placingLocation = false;
 
-let editingRouterId = null;
+  let pendingDeleteId = null;
 
-let pendingDeleteId = null;
+  let activeInfoId = null;
 
-let selectedStatus = "active";
+  let placingMarker = null;
 
-let selectedLat = null;
+  // ============================================================
+  // LOCAL BACKUP
+  // ============================================================
 
-let selectedLng = null;
+  function loadLocalRouters() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
 
-let placingMode = false;
+      if (!raw) {
+        return [];
+      }
 
-let currentSearchTerm = "";
+      const parsed = JSON.parse(raw);
 
-let isLoading = false;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
 
-let isSaving = false;
-
-
-/* =========================================================
-   4. DOM HELPERS
-   ========================================================= */
-
-function $(id) {
-  return document.getElementById(id);
-}
-
-
-/* =========================================================
-   5. TOAST
-   ========================================================= */
-
-function showToast(message, duration = 2500) {
-  const toast = $("toast");
-
-  if (!toast) return;
-
-  toast.textContent = message;
-  toast.classList.remove("hidden");
-
-  clearTimeout(showToast.timer);
-
-  showToast.timer = setTimeout(() => {
-    toast.classList.add("hidden");
-  }, duration);
-}
-
-
-/* =========================================================
-   6. SHEET HELPERS
-   ========================================================= */
-
-const SHEET_IDS = [
-  "routersSheet",
-  "infoSheet",
-  "formSheet",
-  "settingsSheet"
-];
-
-function getSheet(id) {
-  return $(id);
-}
-
-function hideAllSheets() {
-  SHEET_IDS.forEach(id => {
-    const sheet = getSheet(id);
-
-    if (!sheet) return;
-
-    sheet.classList.remove("open");
-    sheet.setAttribute("aria-hidden", "true");
-  });
-
-  const backdrop = $("sheetBackdrop");
-
-  if (backdrop) {
-    backdrop.classList.add("hidden");
-  }
-}
-
-function openSheet(id) {
-  hideAllSheets();
-
-  const sheet = getSheet(id);
-
-  if (!sheet) return;
-
-  sheet.classList.add("open");
-  sheet.setAttribute("aria-hidden", "false");
-
-  const backdrop = $("sheetBackdrop");
-
-  if (backdrop) {
-    backdrop.classList.remove("hidden");
-  }
-}
-
-function closeSheets() {
-  hideAllSheets();
-}
-
-
-/* =========================================================
-   7. LOCAL STORAGE BACKUP
-   ========================================================= */
-
-/*
-   LocalStorage is no longer the main database.
-
-   We still keep a local backup because:
-   - it protects against accidental data loss
-   - it lets us migrate old router data
-   - it provides a temporary offline backup
-*/
-
-function getLocalRouters() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-
-    if (!raw) {
+      return normalizeRouters(parsed);
+    } catch (error) {
+      console.warn("Could not read local router backup:", error);
       return [];
     }
-
-    const parsed = JSON.parse(raw);
-
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed;
-  } catch (error) {
-    console.error("Could not read local router data:", error);
-    return [];
-  }
-}
-
-function saveLocalBackup() {
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(routers)
-    );
-  } catch (error) {
-    console.warn("Could not save local backup:", error);
-  }
-}
-
-
-/* =========================================================
-   8. DATA NORMALIZATION
-   ========================================================= */
-
-function normalizeRouter(router) {
-  if (!router) return null;
-
-  const lat = Number(router.lat);
-  const lng = Number(router.lng);
-
-  if (!router.id) {
-    return null;
   }
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return null;
-  }
-
-  return {
-    id: String(router.id).trim(),
-
-    model: router.model
-      ? String(router.model).trim()
-      : "",
-
-    lat,
-
-    lng,
-
-    status: STATUS[router.status]
-      ? router.status
-      : "active",
-
-    notes: router.notes
-      ? String(router.notes)
-      : "",
-
-    created_at: router.created_at || null,
-
-    updated_at: router.updated_at || null
-  };
-}
-
-
-/* =========================================================
-   9. SUPABASE LOAD
-   ========================================================= */
-
-async function loadRoutersFromSupabase() {
-  if (!supabaseClient) {
-    throw new Error(
-      "Supabase client was not initialized."
-    );
-  }
-
-  const { data, error } = await supabaseClient
-    .from("routers")
-    .select("*")
-    .order("id", { ascending: true });
-
-  if (error) {
-    console.error("Supabase load error:", error);
-    throw error;
-  }
-
-  return Array.isArray(data)
-    ? data
-        .map(normalizeRouter)
-        .filter(Boolean)
-    : [];
-}
-
-
-/* =========================================================
-   10. SUPABASE INSERT
-   ========================================================= */
-
-async function insertRouterIntoSupabase(router) {
-  if (!supabaseClient) {
-    throw new Error(
-      "Supabase client was not initialized."
-    );
-  }
-
-  const payload = {
-    id: router.id,
-    model: router.model || "",
-    lat: Number(router.lat),
-    lng: Number(router.lng),
-    status: router.status || "active",
-    notes: router.notes || ""
-  };
-
-  const { data, error } = await supabaseClient
-    .from("routers")
-    .insert(payload)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Supabase insert error:", error);
-    throw error;
-  }
-
-  return normalizeRouter(data);
-}
-
-
-/* =========================================================
-   11. SUPABASE UPDATE
-   ========================================================= */
-
-async function updateRouterInSupabase(id, changes) {
-  if (!supabaseClient) {
-    throw new Error(
-      "Supabase client was not initialized."
-    );
-  }
-
-  const payload = {
-    ...changes,
-    updated_at: new Date().toISOString()
-  };
-
-  const { data, error } = await supabaseClient
-    .from("routers")
-    .update(payload)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Supabase update error:", error);
-    throw error;
-  }
-
-  return normalizeRouter(data);
-}
-
-
-/* =========================================================
-   12. SUPABASE DELETE
-   ========================================================= */
-
-async function deleteRouterFromSupabase(id) {
-  if (!supabaseClient) {
-    throw new Error(
-      "Supabase client was not initialized."
-    );
-  }
-
-  const { error } = await supabaseClient
-    .from("routers")
-    .delete()
-    .eq("id", id);
-
-  if (error) {
-    console.error("Supabase delete error:", error);
-    throw error;
-  }
-
-  return true;
-}
-
-
-/* =========================================================
-   13. MIGRATE OLD LOCAL DATA
-   ========================================================= */
-
-/*
-   If you previously used the app before Supabase,
-   your routers may still be inside localStorage.
-
-   If Supabase is empty, we automatically copy those
-   old routers into Supabase.
-
-   We DO NOT delete the local backup.
-*/
-
-async function migrateLocalRoutersIfNeeded() {
-  try {
-    const localRouters = getLocalRouters();
-
-    if (!localRouters.length) {
-      return false;
-    }
-
-    const validLocalRouters = localRouters
-      .map(normalizeRouter)
-      .filter(Boolean);
-
-    if (!validLocalRouters.length) {
-      return false;
-    }
-
-    const { count, error: countError } =
-      await supabaseClient
-        .from("routers")
-        .select("*", {
-          count: "exact",
-          head: true
-        });
-
-    if (countError) {
-      console.warn(
-        "Could not check Supabase router count:",
-        countError
+  function saveLocalRouters() {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(routers)
       );
+    } catch (error) {
+      console.warn("Could not save local router backup:", error);
+    }
+  }
 
-      return false;
+  function normalizeRouter(router) {
+    return {
+      id: String(router.id || "").trim(),
+      model: String(router.model || "").trim(),
+      lat: Number(router.lat),
+      lng: Number(router.lng),
+      status: STATUS[router.status]
+        ? router.status
+        : "active",
+      notes: String(router.notes || "").trim()
+    };
+  }
+
+  function normalizeRouters(list) {
+    return list
+      .map(normalizeRouter)
+      .filter(function (r) {
+        return (
+          r.id &&
+          r.model &&
+          Number.isFinite(r.lat) &&
+          Number.isFinite(r.lng)
+        );
+      });
+  }
+
+  // ============================================================
+  // SUPABASE
+  // ============================================================
+
+  async function loadRoutersFromSupabase() {
+    if (!supabaseClient) {
+      throw new Error("Supabase client is not available.");
     }
 
-    /*
-       Only migrate automatically when the database
-       is completely empty.
-    */
+    const { data, error } = await supabaseClient
+      .from("routers")
+      .select(
+        "id, model, lat, lng, status, notes, created_at, updated_at"
+      )
+      .order("id", { ascending: true });
 
-    if (count !== 0) {
-      return false;
+    if (error) {
+      console.error("Supabase LOAD error:", error);
+      throw new Error(error.message);
     }
 
-    showToast(
-      "Moving existing routers to the database..."
-    );
+    return normalizeRouters(data || []);
+  }
 
-    const payload = validLocalRouters.map(router => ({
+  async function insertRouterIntoSupabase(router) {
+    if (!supabaseClient) {
+      throw new Error("Supabase client is not available.");
+    }
+
+    const payload = {
       id: router.id,
-      model: router.model || "",
-      lat: router.lat,
-      lng: router.lng,
+      model: router.model,
+      lat: Number(router.lat),
+      lng: Number(router.lng),
       status: router.status || "active",
       notes: router.notes || ""
-    }));
+    };
+
+    console.log("Adding router to Supabase:", payload);
+
+    // Deliberately NOT using .select().single()
+    const { error } = await supabaseClient
+      .from("routers")
+      .insert(payload);
+
+    if (error) {
+      console.error("Supabase INSERT error:", error);
+      throw new Error(error.message);
+    }
+
+    return router;
+  }
+
+  async function updateRouterInSupabase(router) {
+    if (!supabaseClient) {
+      throw new Error("Supabase client is not available.");
+    }
+
+    const payload = {
+      model: router.model,
+      lat: Number(router.lat),
+      lng: Number(router.lng),
+      status: router.status || "active",
+      notes: router.notes || "",
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabaseClient
+      .from("routers")
+      .update(payload)
+      .eq("id", router.id);
+
+    if (error) {
+      console.error("Supabase UPDATE error:", error);
+      throw new Error(error.message);
+    }
+
+    return router;
+  }
+
+  async function deleteRouterFromSupabase(id) {
+    if (!supabaseClient) {
+      throw new Error("Supabase client is not available.");
+    }
+
+    const { error } = await supabaseClient
+      .from("routers")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Supabase DELETE error:", error);
+      throw new Error(error.message);
+    }
+  }
+
+  async function upsertRoutersToSupabase(list) {
+    if (!supabaseClient) {
+      throw new Error("Supabase client is not available.");
+    }
+
+    const payload = list.map(function (router) {
+      return {
+        id: router.id,
+        model: router.model,
+        lat: Number(router.lat),
+        lng: Number(router.lng),
+        status: router.status || "active",
+        notes: router.notes || ""
+      };
+    });
+
+    if (!payload.length) {
+      return;
+    }
 
     const { error } = await supabaseClient
       .from("routers")
@@ -455,402 +269,509 @@ async function migrateLocalRoutersIfNeeded() {
       });
 
     if (error) {
-      console.error(
-        "Migration error:",
-        error
-      );
-
-      showToast(
-        "Could not migrate old router data."
-      );
-
-      return false;
+      console.error("Supabase UPSERT error:", error);
+      throw new Error(error.message);
     }
-
-    showToast(
-      `${payload.length} existing router${payload.length === 1 ? "" : "s"} moved to Supabase.`
-    );
-
-    return true;
-
-  } catch (error) {
-    console.error(
-      "Local migration failed:",
-      error
-    );
-
-    return false;
-  }
-}
-
-
-/* =========================================================
-   14. LOAD APPLICATION DATA
-   ========================================================= */
-
-async function loadApplicationData() {
-  if (!supabaseClient) {
-    showToast(
-      "Supabase could not be initialized."
-    );
-
-    return;
   }
 
-  isLoading = true;
+  // ============================================================
+  // ESCAPE HTML
+  // ============================================================
 
-  try {
-    /*
-       First load the database.
-    */
-
-    let databaseRouters =
-      await loadRoutersFromSupabase();
-
-    /*
-       If database is empty, check whether the old
-       browser has router data that needs migrating.
-    */
-
-    if (databaseRouters.length === 0) {
-      const migrated =
-        await migrateLocalRoutersIfNeeded();
-
-      if (migrated) {
-        databaseRouters =
-          await loadRoutersFromSupabase();
-      }
-    }
-
-    routers = databaseRouters;
-
-    saveLocalBackup();
-
-    renderAll();
-
-  } catch (error) {
-    console.error(
-      "Could not load application data:",
-      error
-    );
-
-    /*
-       If Supabase fails, show local backup rather
-       than showing a completely empty map.
-    */
-
-    const localRouters = getLocalRouters();
-
-    if (localRouters.length) {
-      routers = localRouters
-        .map(normalizeRouter)
-        .filter(Boolean);
-
-      renderAll();
-
-      showToast(
-        "Database unavailable. Showing local backup.",
-        5000
-      );
-    } else {
-      routers = [];
-
-      renderAll();
-
-      showToast(
-        "Could not connect to Supabase.",
-        5000
-      );
-    }
-
-  } finally {
-    isLoading = false;
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
-}
 
+  // ============================================================
+  // MAP SETUP
+  // ============================================================
 
-/* =========================================================
-   15. MAP INITIALIZATION
-   ========================================================= */
+  const initialRouter =
+    routers.length > 0 ? routers[0] : null;
 
-function initMap() {
-  map = L.map("map", {
-    zoomControl: false,
-    attributionControl: true
+  const map = L.map("map", {
+    zoomControl: true
   }).setView(
-    [-1.286389, 36.817223],
-    12
+    initialRouter
+      ? [initialRouter.lat, initialRouter.lng]
+      : [-1.286389, 36.817223],
+    initialRouter ? 13 : 10
   );
 
   L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {
-      maxZoom: 20,
+      maxZoom: 19,
+
       attribution:
-        '&copy; OpenStreetMap contributors'
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }
   ).addTo(map);
 
-  L.control.zoom({
-    position: "bottomright"
-  }).addTo(map);
+  // ============================================================
+  // MAP CLICK FOR LOCATION
+  // ============================================================
 
-  markersLayer = L.layerGroup().addTo(map);
+  map.on("click", function (e) {
+    if (!placingLocation) {
+      return;
+    }
 
-  map.on("click", handleMapClick);
-}
+    pendingLatLng = {
+      lat: e.latlng.lat,
+      lng: e.latlng.lng
+    };
 
+    showPlacingMarker(pendingLatLng);
 
-/* =========================================================
-   16. MARKER ICON
-   ========================================================= */
+    placingLocation = false;
 
-function iconFor(status) {
-  const info =
-    STATUS[status] || STATUS.active;
+    document
+      .getElementById("placingHint")
+      .classList.add("hidden");
 
-  return L.divIcon({
-    className: "",
-    html:
-      '<div class="router-marker">' +
-      info.emoji +
-      "</div>",
-    iconSize: [34, 34],
-    iconAnchor: [17, 30],
-    popupAnchor: [0, -30]
+    updateLocationPreview();
+
+    openSheet(
+      document.getElementById("formSheet"),
+      "add"
+    );
   });
-}
 
+  // ============================================================
+  // TEMPORARY PLACING MARKER
+  // ============================================================
 
-/* =========================================================
-   17. RENDER MAP MARKERS
-   ========================================================= */
+  function showPlacingMarker(latlng) {
+    if (placingMarker) {
+      placingMarker.setLatLng(latlng);
+      return;
+    }
 
-function renderMarkers() {
-  if (!map || !markersLayer) {
-    return;
+    placingMarker = L.marker(latlng, {
+      icon: L.divIcon({
+        className: "",
+        html:
+          '<div class="router-marker">📍</div>',
+        iconSize: [32, 32],
+        iconAnchor: [16, 30]
+      })
+    }).addTo(map);
   }
 
-  markersLayer.clearLayers();
+  function clearPlacingMarker() {
+    if (placingMarker) {
+      map.removeLayer(placingMarker);
+      placingMarker = null;
+    }
+  }
 
-  routers.forEach(router => {
-    const marker = L.marker(
-      [router.lat, router.lng],
-      {
-        icon: iconFor(router.status)
+  // ============================================================
+  // ROUTER MARKER
+  // ============================================================
+
+  function iconFor(status) {
+    const info =
+      STATUS[status] || STATUS.active;
+
+    return L.divIcon({
+      className: "",
+
+      html:
+        '<div class="router-marker">' +
+        info.emoji +
+        "</div>",
+
+      iconSize: [34, 34],
+
+      iconAnchor: [17, 30]
+    });
+  }
+
+  // ============================================================
+  // RENDER EVERYTHING
+  // ============================================================
+
+  function renderAll() {
+    renderMarkers();
+
+    renderList();
+  }
+
+  // ============================================================
+  // RENDER MARKERS
+  // ============================================================
+
+  function renderMarkers() {
+    Object.keys(markers).forEach(function (id) {
+      const exists = routers.some(function (r) {
+        return r.id === id;
+      });
+
+      if (!exists) {
+        map.removeLayer(markers[id]);
+        delete markers[id];
       }
-    );
-
-    marker.on("click", () => {
-      showRouterInfo(router.id);
     });
 
-    marker.addTo(markersLayer);
-  });
-}
+    routers.forEach(function (router) {
+      if (markers[router.id]) {
+        markers[router.id].setLatLng([
+          router.lat,
+          router.lng
+        ]);
 
+        markers[router.id].setIcon(
+          iconFor(router.status)
+        );
+      } else {
+        const marker = L.marker(
+          [router.lat, router.lng],
+          {
+            icon: iconFor(router.status)
+          }
+        ).addTo(map);
 
-/* =========================================================
-   18. FIT MAP TO ROUTERS
-   ========================================================= */
+        marker.on("click", function () {
+          showInfo(router.id);
+        });
 
-function fitMapToRouters() {
-  if (!map || !routers.length) {
-    return;
+        markers[router.id] = marker;
+      }
+    });
   }
 
-  const points = routers.map(router => [
-    router.lat,
-    router.lng
-  ]);
+  // ============================================================
+  // ROUTER LIST
+  // ============================================================
 
-  if (points.length === 1) {
-    map.setView(points[0], 16);
-    return;
+  function buildRouterRow(router, onClick) {
+    const status =
+      STATUS[router.status] || STATUS.active;
+
+    const row = document.createElement("div");
+
+    row.className = "router-row";
+
+    row.innerHTML =
+      '<span class="dot">' +
+      status.emoji +
+      "</span>" +
+
+      '<span class="rid">' +
+      escapeHtml(router.id) +
+      "</span>" +
+
+      '<span class="rmodel">' +
+      escapeHtml(router.model) +
+      "</span>";
+
+    row.addEventListener("click", onClick);
+
+    return row;
   }
 
-  const bounds =
-    L.latLngBounds(points);
+  function renderRouterListInto(
+    container,
+    list,
+    emptyMessage,
+    onRowClick
+  ) {
+    container.innerHTML = "";
 
-  map.fitBounds(bounds, {
-    padding: [40, 40],
-    maxZoom: 16
-  });
-}
+    if (list.length === 0) {
+      const empty = document.createElement("div");
 
+      empty.className = "empty-state";
 
-/* =========================================================
-   19. RENDER ROUTER LIST
-   ========================================================= */
+      empty.textContent = emptyMessage;
 
-function renderRouterList(searchTerm = "") {
-  const list = $("routerList");
+      container.appendChild(empty);
 
-  if (!list) return;
+      return;
+    }
 
-  const term =
-    String(searchTerm || "")
-      .trim()
-      .toLowerCase();
-
-  let filtered = routers;
-
-  if (term) {
-    filtered = routers.filter(router => {
-      return (
-        router.id.toLowerCase().includes(term) ||
-        router.model.toLowerCase().includes(term) ||
-        router.status.toLowerCase().includes(term) ||
-        router.notes.toLowerCase().includes(term)
+    list.forEach(function (router) {
+      container.appendChild(
+        buildRouterRow(router, function () {
+          onRowClick(router.id);
+        })
       );
     });
   }
 
-  filtered.sort((a, b) =>
-    a.id.localeCompare(b.id, undefined, {
-      numeric: true,
-      sensitivity: "base"
-    })
-  );
+  function renderList() {
+    const countEl =
+      document.getElementById("routerCount");
 
-  if (!filtered.length) {
-    list.innerHTML =
-      '<div class="empty-state">' +
-      (term
-        ? "No routers match your search."
-        : "No routers added yet.") +
-      "</div>";
+    countEl.textContent = String(routers.length);
 
-    return;
-  }
+    const searchValue =
+      document
+        .getElementById("listSearchInput")
+        .value
+        .trim()
+        .toLowerCase();
 
-  list.innerHTML = "";
+    const filtered = searchValue
+      ? filterRouters(searchValue)
+      : routers;
 
-  filtered.forEach(router => {
-    const status =
-      STATUS[router.status] ||
-      STATUS.active;
+    renderRouterListInto(
+      document.getElementById("routerList"),
 
-    const item =
-      document.createElement("button");
+      filtered,
 
-    item.type = "button";
+      routers.length === 0
+        ? 'No routers yet. Tap "Add" to place your first one.'
+        : "No routers match your search.",
 
-    item.className = "router-item";
-
-    item.innerHTML = `
-      <div class="router-item-main">
-        <div class="router-item-id">
-          ${escapeHtml(router.id)}
-        </div>
-
-        <div class="router-item-model">
-          ${escapeHtml(router.model || "Unknown model")}
-        </div>
-      </div>
-
-      <div class="router-item-right">
-        <div class="router-item-status">
-          ${status.emoji}
-        </div>
-
-        <div class="router-item-arrow">
-          ›
-        </div>
-      </div>
-    `;
-
-    item.addEventListener(
-      "click",
-      () => {
-        showRouterInfo(router.id);
+      function (id) {
+        focusAndShowInfo(id);
       }
     );
-
-    list.appendChild(item);
-  });
-}
-
-
-/* =========================================================
-   20. UPDATE ROUTER COUNT
-   ========================================================= */
-
-function updateRouterCount() {
-  const count = $("routerCount");
-
-  if (!count) return;
-
-  count.textContent = routers.length;
-}
-
-
-/* =========================================================
-   21. RENDER ALL
-   ========================================================= */
-
-function renderAll() {
-  renderMarkers();
-  renderRouterList(currentSearchTerm);
-  updateRouterCount();
-}
-
-
-/* =========================================================
-   22. ESCAPE HTML
-   ========================================================= */
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-
-/* =========================================================
-   23. SHOW ROUTER INFORMATION
-   ========================================================= */
-
-function showRouterInfo(id) {
-  const router =
-    routers.find(item => item.id === id);
-
-  if (!router) {
-    showToast("Router not found.");
-    return;
   }
 
-  currentRouterId = id;
+  function filterRouters(query) {
+    return routers.filter(function (router) {
+      return (
+        router.id.toLowerCase().includes(query) ||
+        router.model.toLowerCase().includes(query) ||
+        (router.notes || "")
+          .toLowerCase()
+          .includes(query)
+      );
+    });
+  }
 
-  const status =
-    STATUS[router.status] ||
-    STATUS.active;
+  document
+    .getElementById("listSearchInput")
+    .addEventListener("input", renderList);
 
-  $("infoId").textContent =
-    router.id;
+  // ============================================================
+  // SHEETS
+  // ============================================================
 
-  $("infoModel").textContent =
-    router.model || "Unknown model";
+  const sheetBackdrop =
+    document.getElementById("sheetBackdrop");
 
-  $("infoStatus").innerHTML =
-    `${status.emoji} ${status.label}`;
+  const allSheets = Array.from(
+    document.querySelectorAll(".sheet")
+  );
 
-  $("infoNotes").textContent =
-    router.notes || "No notes";
+  const navButtons = Array.from(
+    document.querySelectorAll(".nav-btn")
+  );
 
-  $("infoCoords").textContent =
-    `${router.lat.toFixed(6)}, ${router.lng.toFixed(6)}`;
+  function setNavActive(tab) {
+    navButtons.forEach(function (button) {
+      button.classList.toggle(
+        "active",
+        button.getAttribute("data-tab") === tab
+      );
+    });
+  }
 
-  openSheet("infoSheet");
+  function anySheetOpen() {
+    return allSheets.some(function (sheet) {
+      return sheet.classList.contains("open");
+    });
+  }
 
-  /*
-     Center map on selected router.
-  */
+  function openSheet(el, navTab) {
+    allSheets.forEach(function (sheet) {
+      if (sheet !== el) {
+        sheet.classList.remove("open");
+        sheet.setAttribute("aria-hidden", "true");
+      }
+    });
 
-  if (map) {
+    el.classList.add("open");
+
+    el.setAttribute("aria-hidden", "false");
+
+    sheetBackdrop.classList.remove("hidden");
+
+    setNavActive(navTab || null);
+  }
+
+  function closeSheet(el) {
+    el.classList.remove("open");
+
+    el.setAttribute("aria-hidden", "true");
+
+    if (!anySheetOpen()) {
+      sheetBackdrop.classList.add("hidden");
+
+      setNavActive("map");
+    }
+  }
+
+  function closeAllSheets() {
+    allSheets.forEach(function (sheet) {
+      sheet.classList.remove("open");
+
+      sheet.setAttribute("aria-hidden", "true");
+    });
+
+    sheetBackdrop.classList.add("hidden");
+
+    setNavActive("map");
+  }
+
+  sheetBackdrop.addEventListener(
+    "click",
+    function () {
+      if (
+        document
+          .getElementById("formSheet")
+          .classList.contains("open")
+      ) {
+        closeForm();
+      } else {
+        closeAllSheets();
+      }
+    }
+  );
+
+  document
+    .querySelectorAll("[data-close]")
+    .forEach(function (button) {
+      button.addEventListener("click", function () {
+        const sheet = button.closest(".sheet");
+
+        if (!sheet) {
+          return;
+        }
+
+        if (sheet.id === "formSheet") {
+          closeForm();
+        } else {
+          closeSheet(sheet);
+        }
+      });
+    });
+
+  // ============================================================
+  // BOTTOM NAVIGATION
+  // ============================================================
+
+  document
+    .querySelector('.nav-btn[data-tab="map"]')
+    .addEventListener("click", function () {
+      if (!placingLocation) {
+        closeAllSheets();
+      }
+    });
+
+  document
+    .querySelector('.nav-btn[data-tab="routers"]')
+    .addEventListener("click", function () {
+      renderList();
+
+      openSheet(
+        document.getElementById("routersSheet"),
+        "routers"
+      );
+    });
+
+  document
+    .querySelector('.nav-btn[data-tab="add"]')
+    .addEventListener("click", function () {
+      openAddForm();
+    });
+
+  document
+    .getElementById("moreBtn")
+    .addEventListener("click", function () {
+      openSheet(
+        document.getElementById("settingsSheet"),
+        null
+      );
+    });
+
+  // ============================================================
+  // ROUTER INFO
+  // ============================================================
+
+  const infoSheet =
+    document.getElementById("infoSheet");
+
+  function showInfo(id) {
+    const router = routers.find(function (r) {
+      return r.id === id;
+    });
+
+    if (!router) {
+      return;
+    }
+
+    activeInfoId = id;
+
+    const status =
+      STATUS[router.status] || STATUS.active;
+
+    document.getElementById("infoId").textContent =
+      router.id;
+
+    document.getElementById("infoModel").textContent =
+      router.model;
+
+    document.getElementById("infoStatus").textContent =
+      status.emoji + " " + status.label;
+
+    document.getElementById("infoNotes").textContent =
+      router.notes ? router.notes : "—";
+
+    document.getElementById("infoCoords").textContent =
+      "📍 " +
+      Number(router.lat).toFixed(5) +
+      ", " +
+      Number(router.lng).toFixed(5);
+
+    document.getElementById(
+      "navigateBtn"
+    ).onclick = function () {
+      const url =
+        "https://www.google.com/maps/dir/?api=1&destination=" +
+        router.lat +
+        "," +
+        router.lng;
+
+      window.open(url, "_blank");
+    };
+
+    document.getElementById(
+      "infoEditBtn"
+    ).onclick = function () {
+      closeSheet(infoSheet);
+
+      openEditForm(router.id);
+    };
+
+    document.getElementById(
+      "infoDeleteBtn"
+    ).onclick = function () {
+      openConfirmDelete(router.id);
+    };
+
+    openSheet(infoSheet, "map");
+  }
+
+  function focusAndShowInfo(id) {
+    const router = routers.find(function (r) {
+      return r.id === id;
+    });
+
+    if (!router) {
+      return;
+    }
+
     map.setView(
       [router.lat, router.lng],
       Math.max(map.getZoom(), 16),
@@ -858,1943 +779,1143 @@ function showRouterInfo(id) {
         animate: true
       }
     );
-  }
-}
 
-
-/* =========================================================
-   24. NAVIGATE TO ROUTER
-   ========================================================= */
-
-function navigateToRouter() {
-  if (!currentRouterId) {
-    return;
+    showInfo(id);
   }
 
-  const router =
-    routers.find(
-      item => item.id === currentRouterId
-    );
+  // ============================================================
+  // ADD / EDIT FORM
+  // ============================================================
 
-  if (!router) {
-    showToast("Router not found.");
-    return;
-  }
+  const formSheet =
+    document.getElementById("formSheet");
 
-  const url =
-    "https://www.google.com/maps/dir/?api=1&destination=" +
-    encodeURIComponent(
-      router.lat + "," + router.lng
-    );
+  const routerForm =
+    document.getElementById("routerForm");
 
-  window.open(
-    url,
-    "_blank",
-    "noopener,noreferrer"
-  );
-}
+  const formTitle =
+    document.getElementById("formTitle");
 
+  const fieldId =
+    document.getElementById("fieldId");
 
-/* =========================================================
-   25. OPEN ADD FORM
-   ========================================================= */
+  const fieldModel =
+    document.getElementById("fieldModel");
 
-function openAddForm() {
-  editingRouterId = null;
+  const fieldNotes =
+    document.getElementById("fieldNotes");
 
-  $("formTitle").textContent =
-    "Add Router";
+  const statusPicker =
+    document.getElementById("statusPicker");
 
-  $("fieldId").value = "";
+  const locationPreview =
+    document.getElementById("locationPreview");
 
-  $("fieldModel").value = "";
+  const saveRouterBtn =
+    document.getElementById("saveRouterBtn");
 
-  $("fieldNotes").value = "";
+  const placingHint =
+    document.getElementById("placingHint");
 
-  selectedStatus = "active";
+  statusPicker.addEventListener(
+    "click",
+    function (e) {
+      const button =
+        e.target.closest(".status-opt");
 
-  selectedLat = null;
-  selectedLng = null;
-
-  updateStatusPicker();
-
-  updateLocationPreview();
-
-  $("saveRouterBtn").disabled = true;
-
-  openSheet("formSheet");
-
-  setTimeout(() => {
-    $("fieldId").focus();
-  }, 250);
-}
-
-
-/* =========================================================
-   26. OPEN EDIT FORM
-   ========================================================= */
-
-function openEditForm() {
-  if (!currentRouterId) {
-    return;
-  }
-
-  const router =
-    routers.find(
-      item => item.id === currentRouterId
-    );
-
-  if (!router) {
-    showToast("Router not found.");
-    return;
-  }
-
-  editingRouterId = router.id;
-
-  $("formTitle").textContent =
-    "Edit Router";
-
-  $("fieldId").value =
-    router.id;
-
-  $("fieldModel").value =
-    router.model || "";
-
-  $("fieldNotes").value =
-    router.notes || "";
-
-  selectedStatus =
-    router.status || "active";
-
-  selectedLat =
-    Number(router.lat);
-
-  selectedLng =
-    Number(router.lng);
-
-  updateStatusPicker();
-
-  updateLocationPreview();
-
-  updateSaveButton();
-
-  openSheet("formSheet");
-}
-
-
-/* =========================================================
-   27. STATUS PICKER
-   ========================================================= */
-
-function updateStatusPicker() {
-  const buttons =
-    document.querySelectorAll(
-      ".status-opt"
-    );
-
-  buttons.forEach(button => {
-    const status =
-      button.dataset.status;
-
-    button.classList.toggle(
-      "selected",
-      status === selectedStatus
-    );
-
-    button.classList.toggle(
-      "active",
-      status === selectedStatus
-    );
-  });
-}
-
-
-/* =========================================================
-   28. LOCATION PREVIEW
-   ========================================================= */
-
-function updateLocationPreview() {
-  const preview =
-    $("locationPreview");
-
-  if (!preview) return;
-
-  if (
-    selectedLat === null ||
-    selectedLng === null
-  ) {
-    preview.textContent =
-      "No location selected yet";
-
-    return;
-  }
-
-  preview.textContent =
-    `${Number(selectedLat).toFixed(6)}, ${Number(selectedLng).toFixed(6)}`;
-}
-
-
-/* =========================================================
-   29. UPDATE SAVE BUTTON
-   ========================================================= */
-
-function updateSaveButton() {
-  const button =
-    $("saveRouterBtn");
-
-  if (!button) return;
-
-  const id =
-    $("fieldId").value.trim();
-
-  const model =
-    $("fieldModel").value.trim();
-
-  const hasLocation =
-    Number.isFinite(Number(selectedLat)) &&
-    Number.isFinite(Number(selectedLng));
-
-  const hasRequiredFields =
-    id.length > 0 &&
-    model.length > 0 &&
-    hasLocation;
-
-  button.disabled =
-    !hasRequiredFields ||
-    isSaving;
-}
-
-
-/* =========================================================
-   30. HANDLE MAP CLICK
-   ========================================================= */
-
-function handleMapClick(event) {
-  if (!placingMode) {
-    return;
-  }
-
-  selectedLat =
-    event.latlng.lat;
-
-  selectedLng =
-    event.latlng.lng;
-
-  placingMode = false;
-
-  hidePlacingHint();
-
-  updateLocationPreview();
-
-  updateSaveButton();
-
-  /*
-     Open form again if it was closed
-     during map selection.
-  */
-
-  openSheet("formSheet");
-
-  showToast(
-    "Location selected."
-  );
-}
-
-
-/* =========================================================
-   31. START MAP PLACEMENT
-   ========================================================= */
-
-function startMapPlacement() {
-  placingMode = true;
-
-  hideAllSheets();
-
-  const hint =
-    $("placingHint");
-
-  if (hint) {
-    hint.classList.remove("hidden");
-  }
-
-  showToast(
-    "Tap the map to place the router."
-  );
-}
-
-
-/* =========================================================
-   32. CANCEL MAP PLACEMENT
-   ========================================================= */
-
-function cancelMapPlacement() {
-  placingMode = false;
-
-  hidePlacingHint();
-
-  if (editingRouterId) {
-    openSheet("formSheet");
-  }
-}
-
-
-/* =========================================================
-   33. HIDE PLACING HINT
-   ========================================================= */
-
-function hidePlacingHint() {
-  const hint =
-    $("placingHint");
-
-  if (hint) {
-    hint.classList.add("hidden");
-  }
-}
-
-
-/* =========================================================
-   34. USE DEVICE LOCATION
-   ========================================================= */
-
-function getCurrentLocation(callback) {
-  if (!navigator.geolocation) {
-    showToast(
-      "Location is not supported on this device."
-    );
-
-    return;
-  }
-
-  showToast(
-    "Getting your location..."
-  );
-
-  navigator.geolocation.getCurrentPosition(
-    position => {
-      const lat =
-        position.coords.latitude;
-
-      const lng =
-        position.coords.longitude;
-
-      callback(lat, lng);
-    },
-
-    error => {
-      console.error(
-        "Geolocation error:",
-        error
-      );
-
-      let message =
-        "Could not get your location.";
-
-      if (error.code === 1) {
-        message =
-          "Location permission was denied.";
-      } else if (error.code === 2) {
-        message =
-          "Your location could not be determined.";
-      } else if (error.code === 3) {
-        message =
-          "Location request timed out.";
+      if (!button) {
+        return;
       }
 
-      showToast(message, 4000);
-    },
+      statusPicker
+        .querySelectorAll(".status-opt")
+        .forEach(function (b) {
+          b.classList.remove("active");
+        });
 
-    {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0
+      button.classList.add("active");
     }
   );
-}
 
-
-/* =========================================================
-   35. USE LOCATION FOR FORM
-   ========================================================= */
-
-function useLocationForForm() {
-  getCurrentLocation(
-    (lat, lng) => {
-      selectedLat = lat;
-      selectedLng = lng;
-
-      updateLocationPreview();
-
-      updateSaveButton();
-
-      if (map) {
-        map.setView(
-          [lat, lng],
-          17,
-          {
-            animate: true
-          }
+  function setStatusPicker(status) {
+    statusPicker
+      .querySelectorAll(".status-opt")
+      .forEach(function (button) {
+        button.classList.toggle(
+          "active",
+          button.getAttribute("data-status") === status
         );
-      }
-
-      showToast(
-        "Your current location has been selected."
-      );
-    }
-  );
-}
-
-
-/* =========================================================
-   36. LOCATE FAB
-   ========================================================= */
-
-function locateUserOnMap() {
-  getCurrentLocation(
-    (lat, lng) => {
-      if (!map) return;
-
-      map.setView(
-        [lat, lng],
-        17,
-        {
-          animate: true
-        }
-      );
-
-      /*
-         Temporary accuracy marker.
-      */
-
-      const locationMarker =
-        L.circleMarker(
-          [lat, lng],
-          {
-            radius: 8,
-            weight: 3,
-            fillOpacity: 0.8
-          }
-        ).addTo(map);
-
-      setTimeout(() => {
-        map.removeLayer(
-          locationMarker
-        );
-      }, 5000);
-
-      showToast(
-        "Map centered on your location."
-      );
-    }
-  );
-}
-
-
-/* =========================================================
-   37. SAVE ROUTER
-   ========================================================= */
-
-async function handleRouterSubmit(event) {
-  event.preventDefault();
-
-  if (isSaving) {
-    return;
+      });
   }
 
-  const id =
-    $("fieldId").value.trim();
-
-  const model =
-    $("fieldModel").value.trim();
-
-  const notes =
-    $("fieldNotes").value.trim();
-
-  const lat =
-    Number(selectedLat);
-
-  const lng =
-    Number(selectedLng);
-
-  if (!id) {
-    showToast(
-      "Enter a Router ID."
-    );
-
-    $("fieldId").focus();
-
-    return;
-  }
-
-  if (!model) {
-    showToast(
-      "Enter the router model."
-    );
-
-    $("fieldModel").focus();
-
-    return;
-  }
-
-  if (
-    !Number.isFinite(lat) ||
-    !Number.isFinite(lng)
-  ) {
-    showToast(
-      "Select a router location."
-    );
-
-    return;
-  }
-
-  /*
-     Check duplicate ID when adding.
-  */
-
-  if (!editingRouterId) {
-    const exists =
-      routers.some(
-        router =>
-          router.id.toLowerCase() ===
-          id.toLowerCase()
+  function getSelectedStatus() {
+    const active =
+      statusPicker.querySelector(
+        ".status-opt.active"
       );
 
-    if (exists) {
-      showToast(
-        "A router with that ID already exists."
-      );
+    return active
+      ? active.getAttribute("data-status")
+      : "active";
+  }
 
-      $("fieldId").focus();
+  function openAddForm() {
+    editingId = null;
 
+    formTitle.textContent = "Add Router";
+
+    fieldId.value = "";
+
+    fieldId.disabled = false;
+
+    fieldModel.value = "";
+
+    fieldNotes.value = "";
+
+    setStatusPicker("active");
+
+    pendingLatLng = null;
+
+    clearPlacingMarker();
+
+    updateLocationPreview();
+
+    openSheet(formSheet, "add");
+
+    fieldId.focus();
+  }
+
+  function openEditForm(id) {
+    const router = routers.find(function (r) {
+      return r.id === id;
+    });
+
+    if (!router) {
       return;
     }
+
+    editingId = id;
+
+    formTitle.textContent = "Edit Router";
+
+    fieldId.value = router.id;
+
+    fieldId.disabled = true;
+
+    fieldModel.value = router.model;
+
+    fieldNotes.value = router.notes || "";
+
+    setStatusPicker(router.status);
+
+    pendingLatLng = {
+      lat: router.lat,
+      lng: router.lng
+    };
+
+    showPlacingMarker(pendingLatLng);
+
+    updateLocationPreview();
+
+    openSheet(formSheet, "add");
   }
 
-  isSaving = true;
+  function closeForm() {
+    closeSheet(formSheet);
 
-  updateSaveButton();
+    placingLocation = false;
 
-  try {
-    if (editingRouterId) {
-      /*
-         EDIT EXISTING ROUTER
-      */
+    pendingLatLng = null;
 
-      const oldId =
-        editingRouterId;
+    editingId = null;
 
-      /*
-         The database primary key is the router ID.
+    clearPlacingMarker();
 
-         If the ID is changed, we handle this as:
-         1. insert the new router
-         2. delete the old router
-      */
+    placingHint.classList.add("hidden");
+  }
 
-      if (id !== oldId) {
-        const existingNewId =
-          routers.some(
-            router =>
-              router.id.toLowerCase() ===
-              id.toLowerCase() &&
-              router.id !== oldId
+  function updateLocationPreview() {
+    if (pendingLatLng) {
+      locationPreview.textContent =
+        "📍 Location selected — " +
+        pendingLatLng.lat.toFixed(5) +
+        ", " +
+        pendingLatLng.lng.toFixed(5);
+
+      locationPreview.classList.add("set");
+
+      saveRouterBtn.disabled = false;
+    } else {
+      locationPreview.textContent =
+        "No location selected yet";
+
+      locationPreview.classList.remove("set");
+
+      saveRouterBtn.disabled = true;
+    }
+  }
+
+  // ============================================================
+  // PICK LOCATION FROM MAP
+  // ============================================================
+
+  document
+    .getElementById("tapMapBtn")
+    .addEventListener("click", function () {
+      closeSheet(formSheet);
+
+      placingLocation = true;
+
+      placingHint.classList.remove("hidden");
+    });
+
+  document
+    .getElementById("cancelPlacingBtn")
+    .addEventListener("click", function () {
+      placingLocation = false;
+
+      placingHint.classList.add("hidden");
+
+      openSheet(formSheet, "add");
+    });
+
+  // ============================================================
+  // USE CURRENT LOCATION IN FORM
+  // ============================================================
+
+  document
+    .getElementById("useLocationForFormBtn")
+    .addEventListener("click", function () {
+      if (!navigator.geolocation) {
+        showToast(
+          "Geolocation isn't supported by this browser."
+        );
+
+        return;
+      }
+
+      showToast("Locating…");
+
+      navigator.geolocation.getCurrentPosition(
+        function (position) {
+          pendingLatLng = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+
+          showPlacingMarker(pendingLatLng);
+
+          updateLocationPreview();
+
+          map.setView(
+            [
+              pendingLatLng.lat,
+              pendingLatLng.lng
+            ],
+            17
           );
 
-        if (existingNewId) {
           showToast(
-            "That Router ID is already in use."
+            "Using your current location."
+          );
+        },
+
+        function (error) {
+          console.error(
+            "Geolocation error:",
+            error
+          );
+
+          showToast(
+            "Couldn't get your location. Check location permissions."
+          );
+        },
+
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
+    });
+
+  // ============================================================
+  // SAVE ROUTER
+  // ============================================================
+
+  routerForm.addEventListener(
+    "submit",
+    async function (e) {
+      e.preventDefault();
+
+      if (saveRouterBtn.disabled) {
+        return;
+      }
+
+      const id = fieldId.value.trim();
+
+      const model = fieldModel.value.trim();
+
+      const status = getSelectedStatus();
+
+      const notes = fieldNotes.value.trim();
+
+      if (!id || !model || !pendingLatLng) {
+        showToast(
+          "Please fill in Router ID, Model, and pick a location."
+        );
+
+        return;
+      }
+
+      // --------------------------------------------------------
+      // ADD
+      // --------------------------------------------------------
+
+      if (!editingId) {
+        if (
+          routers.some(function (r) {
+            return (
+              r.id.toLowerCase() === id.toLowerCase()
+            );
+          })
+        ) {
+          showToast(
+            'A router with ID "' +
+              id +
+              '" already exists.'
           );
 
           return;
         }
 
-        await insertRouterIntoSupabase({
-          id,
-          model,
-          lat,
-          lng,
-          status: selectedStatus,
-          notes
-        });
+        const newRouter = {
+          id: id,
+          model: model,
+          lat: Number(pendingLatLng.lat),
+          lng: Number(pendingLatLng.lng),
+          status: status,
+          notes: notes
+        };
 
-        await deleteRouterFromSupabase(
-          oldId
-        );
+        const originalText =
+          saveRouterBtn.textContent;
 
-        routers =
-          routers.filter(
-            router =>
-              router.id !== oldId
+        saveRouterBtn.disabled = true;
+
+        saveRouterBtn.textContent = "Saving…";
+
+        try {
+          await insertRouterIntoSupabase(
+            newRouter
           );
 
-        routers.push({
-          id,
-          model,
-          lat,
-          lng,
-          status: selectedStatus,
-          notes
-        });
+          routers.push(newRouter);
 
-      } else {
-        /*
-           Normal update.
-        */
+          saveLocalRouters();
 
-        const updated =
-          await updateRouterInSupabase(
-            oldId,
-            {
-              model,
-              lat,
-              lng,
-              status: selectedStatus,
-              notes
-            }
+          renderAll();
+
+          closeForm();
+
+          showToast(
+            "Router " + id + " added."
           );
 
-        routers =
-          routers.map(
-            router =>
-              router.id === oldId
-                ? updated
-                : router
+          focusAndShowInfo(id);
+        } catch (error) {
+          console.error(
+            "Could not save router:",
+            error
           );
+
+          showToast(
+            "Could not save router: " +
+              error.message
+          );
+        } finally {
+          saveRouterBtn.textContent =
+            originalText;
+
+          updateLocationPreview();
+        }
+
+        return;
       }
 
-      showToast(
-        "Router updated successfully."
-      );
+      // --------------------------------------------------------
+      // EDIT
+      // --------------------------------------------------------
 
-    } else {
-      /*
-         ADD NEW ROUTER
-      */
+      const router = routers.find(function (r) {
+        return r.id === editingId;
+      });
 
-      const newRouter =
-        await insertRouterIntoSupabase({
-          id,
-          model,
-          lat,
-          lng,
-          status: selectedStatus,
-          notes
-        });
+      if (!router) {
+        closeForm();
 
-      routers.push(newRouter);
+        return;
+      }
 
-      showToast(
-        "Router added successfully."
+      const updatedRouter = {
+        id: router.id,
+        model: model,
+        lat: Number(pendingLatLng.lat),
+        lng: Number(pendingLatLng.lng),
+        status: status,
+        notes: notes
+      };
+
+      const originalText =
+        saveRouterBtn.textContent;
+
+      saveRouterBtn.disabled = true;
+
+      saveRouterBtn.textContent = "Saving…";
+
+      try {
+        await updateRouterInSupabase(
+          updatedRouter
+        );
+
+        router.model = updatedRouter.model;
+
+        router.lat = updatedRouter.lat;
+
+        router.lng = updatedRouter.lng;
+
+        router.status = updatedRouter.status;
+
+        router.notes = updatedRouter.notes;
+
+        saveLocalRouters();
+
+        renderAll();
+
+        const savedId = router.id;
+
+        closeForm();
+
+        showToast(
+          "Router " + savedId + " updated."
+        );
+
+        focusAndShowInfo(savedId);
+      } catch (error) {
+        console.error(
+          "Could not update router:",
+          error
+        );
+
+        showToast(
+          "Could not update router: " +
+            error.message
+        );
+      } finally {
+        saveRouterBtn.textContent =
+          originalText;
+      }
+    }
+  );
+
+  document
+    .getElementById("cancelFormBtn")
+    .addEventListener("click", closeForm);
+
+  // ============================================================
+  // DELETE CONFIRMATION
+  // ============================================================
+
+  const confirmOverlay =
+    document.getElementById("confirmOverlay");
+
+  const confirmText =
+    document.getElementById("confirmText");
+
+  function openConfirmDelete(id) {
+    pendingDeleteId = id;
+
+    confirmText.textContent =
+      'Delete router "' +
+      id +
+      '"? This cannot be undone.';
+
+    confirmOverlay.classList.remove("hidden");
+  }
+
+  document
+    .getElementById("confirmCancelBtn")
+    .addEventListener("click", function () {
+      pendingDeleteId = null;
+
+      confirmOverlay.classList.add("hidden");
+    });
+
+  document
+    .getElementById("confirmDeleteBtn")
+    .addEventListener(
+      "click",
+      async function () {
+        if (!pendingDeleteId) {
+          return;
+        }
+
+        const id = pendingDeleteId;
+
+        const button = document.getElementById(
+          "confirmDeleteBtn"
+        );
+
+        const originalText =
+          button.textContent;
+
+        button.disabled = true;
+
+        button.textContent = "Deleting…";
+
+        try {
+          await deleteRouterFromSupabase(id);
+
+          routers = routers.filter(function (r) {
+            return r.id !== id;
+          });
+
+          saveLocalRouters();
+
+          renderAll();
+
+          closeAllSheets();
+
+          showToast("Router deleted.");
+        } catch (error) {
+          console.error(
+            "Could not delete router:",
+            error
+          );
+
+          showToast(
+            "Could not delete router: " +
+              error.message
+          );
+        } finally {
+          pendingDeleteId = null;
+
+          confirmOverlay.classList.add(
+            "hidden"
+          );
+
+          button.disabled = false;
+
+          button.textContent = originalText;
+        }
+      }
+    );
+
+  // ============================================================
+  // TOP SEARCH
+  // ============================================================
+
+  const searchInput =
+    document.getElementById("searchInput");
+
+  const searchClearBtn =
+    document.getElementById("searchClearBtn");
+
+  const searchMatchesOverlay =
+    document.getElementById(
+      "searchMatchesOverlay"
+    );
+
+  searchInput.addEventListener(
+    "input",
+    function () {
+      searchClearBtn.classList.toggle(
+        "hidden",
+        searchInput.value.length === 0
       );
     }
+  );
 
-    saveLocalBackup();
-
-    renderAll();
-
-    hideAllSheets();
-
-    editingRouterId = null;
-
-  } catch (error) {
-    console.error(
-      "Could not save router:",
-      error
-    );
-
-    if (
-      error &&
-      error.code === "23505"
-    ) {
-      showToast(
-        "That Router ID already exists.",
-        4000
-      );
-    } else {
-      showToast(
-        "Could not save router. Check your internet connection.",
-        5000
-      );
+  searchInput.addEventListener(
+    "keydown",
+    function (e) {
+      if (e.key === "Enter") {
+        performSearch(searchInput.value);
+      }
     }
+  );
 
-  } finally {
-    isSaving = false;
+  document
+    .querySelector(".search-icon")
+    .addEventListener("click", function () {
+      performSearch(searchInput.value);
+    });
 
-    updateSaveButton();
-  }
-}
+  searchClearBtn.addEventListener(
+    "click",
+    function () {
+      searchInput.value = "";
 
+      searchClearBtn.classList.add("hidden");
 
-/* =========================================================
-   38. DELETE CONFIRMATION
-   ========================================================= */
-
-function askDeleteRouter() {
-  if (!currentRouterId) {
-    return;
-  }
-
-  const router =
-    routers.find(
-      item => item.id === currentRouterId
-    );
-
-  if (!router) {
-    return;
-  }
-
-  pendingDeleteId =
-    router.id;
-
-  const text =
-    $("confirmText");
-
-  if (text) {
-    text.textContent =
-      `Delete router ${router.id}?`;
-  }
-
-  const overlay =
-    $("confirmOverlay");
-
-  if (overlay) {
-    overlay.classList.remove(
-      "hidden"
-    );
-  }
-}
-
-
-/* =========================================================
-   39. CANCEL DELETE
-   ========================================================= */
-
-function cancelDelete() {
-  pendingDeleteId = null;
-
-  const overlay =
-    $("confirmOverlay");
-
-  if (overlay) {
-    overlay.classList.add(
-      "hidden"
-    );
-  }
-}
-
-
-/* =========================================================
-   40. CONFIRM DELETE
-   ========================================================= */
-
-async function confirmDelete() {
-  if (!pendingDeleteId) {
-    return;
-  }
-
-  const id =
-    pendingDeleteId;
-
-  const deleteButton =
-    $("confirmDeleteBtn");
-
-  if (deleteButton) {
-    deleteButton.disabled = true;
-  }
-
-  try {
-    await deleteRouterFromSupabase(
-      id
-    );
-
-    routers =
-      routers.filter(
-        router =>
-          router.id !== id
-      );
-
-    saveLocalBackup();
-
-    renderAll();
-
-    cancelDelete();
-
-    hideAllSheets();
-
-    currentRouterId = null;
-
-    showToast(
-      "Router deleted."
-    );
-
-  } catch (error) {
-    console.error(
-      "Could not delete router:",
-      error
-    );
-
-    showToast(
-      "Could not delete router. Check your internet connection.",
-      5000
-    );
-
-    if (deleteButton) {
-      deleteButton.disabled = false;
+      searchInput.focus();
     }
-  }
-}
+  );
 
-
-/* =========================================================
-   41. SEARCH
-   ========================================================= */
-
-function performSearch(term) {
-  currentSearchTerm =
-    String(term || "")
+  function performSearch(rawQuery) {
+    const query = rawQuery
       .trim()
       .toLowerCase();
 
-  renderRouterList(
-    currentSearchTerm
-  );
-
-  updateSearchClearButton();
-
-  /*
-     If exactly one router matches,
-     center the map on it.
-  */
-
-  if (!currentSearchTerm) {
-    return;
-  }
-
-  const matches =
-    routers.filter(router => {
-      return (
-        router.id.toLowerCase().includes(
-          currentSearchTerm
-        ) ||
-        router.model.toLowerCase().includes(
-          currentSearchTerm
-        ) ||
-        router.notes.toLowerCase().includes(
-          currentSearchTerm
-        ) ||
-        router.status.toLowerCase().includes(
-          currentSearchTerm
-        )
-      );
-    });
-
-  if (matches.length === 1) {
-    const router =
-      matches[0];
-
-    if (map) {
-      map.setView(
-        [router.lat, router.lng],
-        17,
-        {
-          animate: true
-        }
-      );
+    if (!query) {
+      return;
     }
-  }
-}
 
+    const matches = filterRouters(query);
 
-/* =========================================================
-   42. SEARCH CLEAR
-   ========================================================= */
-
-function clearSearch() {
-  const input =
-    $("searchInput");
-
-  const listInput =
-    $("listSearchInput");
-
-  if (input) {
-    input.value = "";
-  }
-
-  if (listInput) {
-    listInput.value = "";
-  }
-
-  currentSearchTerm = "";
-
-  renderRouterList("");
-
-  updateSearchClearButton();
-}
-
-
-/* =========================================================
-   43. SEARCH CLEAR BUTTON
-   ========================================================= */
-
-function updateSearchClearButton() {
-  const button =
-    $("searchClearBtn");
-
-  const input =
-    $("searchInput");
-
-  if (!button || !input) {
-    return;
-  }
-
-  button.classList.toggle(
-    "hidden",
-    !input.value.trim()
-  );
-}
-
-
-/* =========================================================
-   44. SEARCH MATCHES OVERLAY
-   ========================================================= */
-
-function showSearchMatches() {
-  const input =
-    $("searchInput");
-
-  if (!input) {
-    return;
-  }
-
-  const term =
-    input.value.trim().toLowerCase();
-
-  if (!term) {
-    return;
-  }
-
-  const matches =
-    routers.filter(router => {
-      return (
-        router.id.toLowerCase().includes(term) ||
-        router.model.toLowerCase().includes(term) ||
-        router.status.toLowerCase().includes(term) ||
-        router.notes.toLowerCase().includes(term)
-      );
-    });
-
-  const list =
-    $("searchMatchesList");
-
-  if (!list) {
-    return;
-  }
-
-  list.innerHTML = "";
-
-  if (!matches.length) {
-    list.innerHTML =
-      '<div class="empty-state">No matching routers.</div>';
-  } else {
-    matches.forEach(router => {
-      const button =
-        document.createElement("button");
-
-      button.type = "button";
-
-      button.className =
-        "router-item";
-
-      button.innerHTML = `
-        <div class="router-item-main">
-          <div class="router-item-id">
-            ${escapeHtml(router.id)}
-          </div>
-
-          <div class="router-item-model">
-            ${escapeHtml(router.model)}
-          </div>
-        </div>
-
-        <div class="router-item-right">
-          <div class="router-item-status">
-            ${
-              (STATUS[router.status] ||
-                STATUS.active).emoji
-            }
-          </div>
-
-          <div class="router-item-arrow">
-            ›
-          </div>
-        </div>
-      `;
-
-      button.addEventListener(
-        "click",
-        () => {
-          $("searchMatchesOverlay")
-            .classList.add("hidden");
-
-          showRouterInfo(router.id);
-        }
-      );
-
-      list.appendChild(button);
-    });
-  }
-
-  $("searchMatchesOverlay")
-    .classList.remove("hidden");
-}
-
-
-/* =========================================================
-   45. EXPORT DATA
-   ========================================================= */
-
-function exportData() {
-  const data =
-    JSON.stringify(
-      routers,
-      null,
-      2
-    );
-
-  const blob =
-    new Blob(
-      [data],
-      {
-        type: "application/json"
-      }
-    );
-
-  const url =
-    URL.createObjectURL(blob);
-
-  const link =
-    document.createElement("a");
-
-  link.href = url;
-
-  link.download =
-    "hotspot-router-map-backup-" +
-    new Date()
-      .toISOString()
-      .slice(0, 10) +
-    ".json";
-
-  document.body.appendChild(link);
-
-  link.click();
-
-  link.remove();
-
-  URL.revokeObjectURL(url);
-
-  showToast(
-    "Router data exported."
-  );
-}
-
-
-/* =========================================================
-   46. IMPORT DATA
-   ========================================================= */
-
-function importDataFile(file) {
-  if (!file) {
-    return;
-  }
-
-  const reader =
-    new FileReader();
-
-  reader.onload = async event => {
-    try {
-      const parsed =
-        JSON.parse(
-          event.target.result
-        );
-
-      if (!Array.isArray(parsed)) {
-        throw new Error(
-          "Imported data is not an array."
-        );
-      }
-
-      const imported =
-        parsed
-          .map(normalizeRouter)
-          .filter(Boolean);
-
-      if (!imported.length) {
-        showToast(
-          "No valid routers were found in the file."
-        );
-
-        return;
-      }
-
-      /*
-         Ask before replacing/merging.
-         The current implementation uses UPSERT,
-         so existing IDs are updated and new IDs
-         are inserted.
-      */
-
-      const payload =
-        imported.map(router => ({
-          id: router.id,
-          model: router.model || "",
-          lat: router.lat,
-          lng: router.lng,
-          status: router.status || "active",
-          notes: router.notes || ""
-        }));
-
-      const {
-        data,
-        error
-      } = await supabaseClient
-        .from("routers")
-        .upsert(
-          payload,
-          {
-            onConflict: "id"
-          }
-        )
-        .select();
-
-      if (error) {
-        throw error;
-      }
-
-      /*
-         Reload everything from Supabase so the
-         UI exactly matches the database.
-      */
-
-      routers =
-        (data || [])
-          .map(normalizeRouter)
-          .filter(Boolean);
-
-      /*
-         Important:
-         The returned data may contain only the
-         imported/upserted rows, so reload the
-         complete database.
-      */
-
-      routers =
-        await loadRoutersFromSupabase();
-
-      saveLocalBackup();
-
-      renderAll();
-
+    if (matches.length === 0) {
       showToast(
-        `${imported.length} router${imported.length === 1 ? "" : "s"} imported.`
+        'No routers found for "' +
+          rawQuery.trim() +
+          '".'
       );
+    } else if (matches.length === 1) {
+      searchInput.blur();
 
-    } catch (error) {
-      console.error(
-        "Import error:",
-        error
-      );
+      focusAndShowInfo(matches[0].id);
+    } else {
+      renderRouterListInto(
+        document.getElementById(
+          "searchMatchesList"
+        ),
 
-      showToast(
-        "Could not import the router file.",
-        5000
-      );
-    }
-  };
+        matches,
 
-  reader.readAsText(file);
-}
+        "No matches.",
 
-
-/* =========================================================
-   47. OPEN ROUTER LIST
-   ========================================================= */
-
-function openRouterList() {
-  currentSearchTerm = "";
-
-  const search =
-    $("listSearchInput");
-
-  if (search) {
-    search.value = "";
-  }
-
-  renderRouterList("");
-
-  openSheet(
-    "routersSheet"
-  );
-}
-
-
-/* =========================================================
-   48. OPEN SETTINGS
-   ========================================================= */
-
-function openSettings() {
-  openSheet(
-    "settingsSheet"
-  );
-}
-
-
-/* =========================================================
-   49. MOBILE BOTTOM NAVIGATION
-   ========================================================= */
-
-function setActiveNav(tab) {
-  const buttons =
-    document.querySelectorAll(
-      ".nav-btn"
-    );
-
-  buttons.forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.tab === tab
-    );
-  });
-}
-
-function handleBottomNav(tab) {
-  if (tab === "map") {
-    setActiveNav("map");
-
-    hideAllSheets();
-
-    return;
-  }
-
-  if (tab === "routers") {
-    setActiveNav("routers");
-
-    openRouterList();
-
-    return;
-  }
-
-  if (tab === "add") {
-    setActiveNav("add");
-
-    openAddForm();
-
-    return;
-  }
-}
-
-
-/* =========================================================
-   50. SETTINGS BUTTON
-   ========================================================= */
-
-function setupEventListeners() {
-
-  /*
-     Bottom navigation
-  */
-
-  document
-    .querySelectorAll(".nav-btn")
-    .forEach(button => {
-      button.addEventListener(
-        "click",
-        () => {
-          handleBottomNav(
-            button.dataset.tab
+        function (id) {
+          searchMatchesOverlay.classList.add(
+            "hidden"
           );
+
+          focusAndShowInfo(id);
         }
       );
-    });
 
-
-  /*
-     Close buttons
-  */
+      searchMatchesOverlay.classList.remove(
+        "hidden"
+      );
+    }
+  }
 
   document
-    .querySelectorAll("[data-close]")
-    .forEach(button => {
-      button.addEventListener(
-        "click",
-        () => {
-          closeSheets();
-
-          setActiveNav("map");
-        }
+    .getElementById("closeSearchMatchesBtn")
+    .addEventListener("click", function () {
+      searchMatchesOverlay.classList.add(
+        "hidden"
       );
     });
 
-
-  /*
-     Sheet backdrop
-  */
-
-  const backdrop =
-    $("sheetBackdrop");
-
-  if (backdrop) {
-    backdrop.addEventListener(
-      "click",
-      () => {
-        closeSheets();
-
-        setActiveNav("map");
-
-        if (placingMode) {
-          cancelMapPlacement();
-        }
-      }
-    );
-  }
-
-
-  /*
-     More button
-  */
-
-  const moreBtn =
-    $("moreBtn");
-
-  if (moreBtn) {
-    moreBtn.addEventListener(
-      "click",
-      () => {
-        openSettings();
-      }
-    );
-  }
-
-
-  /*
-     Locate FAB
-  */
-
-  const locateFab =
-    $("locateFab");
-
-  if (locateFab) {
-    locateFab.addEventListener(
-      "click",
-      locateUserOnMap
-    );
-  }
-
-
-  /*
-     Add/edit form
-  */
-
-  const form =
-    $("routerForm");
-
-  if (form) {
-    form.addEventListener(
-      "submit",
-      handleRouterSubmit
-    );
-  }
-
-
-  /*
-     Cancel form
-  */
-
-  const cancelForm =
-    $("cancelFormBtn");
-
-  if (cancelForm) {
-    cancelForm.addEventListener(
-      "click",
-      () => {
-        editingRouterId = null;
-
-        placingMode = false;
-
-        hidePlacingHint();
-
-        hideAllSheets();
-
-        setActiveNav("map");
-      }
-    );
-  }
-
-
-  /*
-     Status buttons
-  */
+  // ============================================================
+  // EXPORT
+  // ============================================================
 
   document
-    .querySelectorAll(".status-opt")
-    .forEach(button => {
-      button.addEventListener(
-        "click",
-        () => {
-          selectedStatus =
-            button.dataset.status;
-
-          updateStatusPicker();
-
-          updateSaveButton();
+    .getElementById("exportBtn")
+    .addEventListener("click", function () {
+      const blob = new Blob(
+        [
+          JSON.stringify(
+            routers,
+            null,
+            2
+          )
+        ],
+        {
+          type: "application/json"
         }
+      );
+
+      const url =
+        URL.createObjectURL(blob);
+
+      const a =
+        document.createElement("a");
+
+      const stamp =
+        new Date()
+          .toISOString()
+          .slice(0, 10);
+
+      a.href = url;
+
+      a.download =
+        "hotspot-routers-" +
+        stamp +
+        ".json";
+
+      document.body.appendChild(a);
+
+      a.click();
+
+      document.body.removeChild(a);
+
+      URL.revokeObjectURL(url);
+
+      closeSheet(
+        document.getElementById(
+          "settingsSheet"
+        )
+      );
+
+      showToast(
+        "Exported " +
+          routers.length +
+          " router(s)."
       );
     });
 
-
-  /*
-     Use location for form
-  */
-
-  const useLocationBtn =
-    $("useLocationForFormBtn");
-
-  if (useLocationBtn) {
-    useLocationBtn.addEventListener(
-      "click",
-      useLocationForForm
-    );
-  }
-
-
-  /*
-     Tap map to choose location
-  */
-
-  const tapMapBtn =
-    $("tapMapBtn");
-
-  if (tapMapBtn) {
-    tapMapBtn.addEventListener(
-      "click",
-      startMapPlacement
-    );
-  }
-
-
-  /*
-     Cancel map placement
-  */
-
-  const cancelPlacingBtn =
-    $("cancelPlacingBtn");
-
-  if (cancelPlacingBtn) {
-    cancelPlacingBtn.addEventListener(
-      "click",
-      cancelMapPlacement
-    );
-  }
-
-
-  /*
-     Navigate
-  */
-
-  const navigateBtn =
-    $("navigateBtn");
-
-  if (navigateBtn) {
-    navigateBtn.addEventListener(
-      "click",
-      navigateToRouter
-    );
-  }
-
-
-  /*
-     Edit router
-  */
-
-  const editBtn =
-    $("infoEditBtn");
-
-  if (editBtn) {
-    editBtn.addEventListener(
-      "click",
-      openEditForm
-    );
-  }
-
-
-  /*
-     Delete router
-  */
-
-  const deleteBtn =
-    $("infoDeleteBtn");
-
-  if (deleteBtn) {
-    deleteBtn.addEventListener(
-      "click",
-      askDeleteRouter
-    );
-  }
-
-
-  /*
-     Delete confirmation
-  */
-
-  const confirmDeleteBtn =
-    $("confirmDeleteBtn");
-
-  if (confirmDeleteBtn) {
-    confirmDeleteBtn.addEventListener(
-      "click",
-      confirmDelete
-    );
-  }
-
-
-  /*
-     Cancel deletion
-  */
-
-  const confirmCancelBtn =
-    $("confirmCancelBtn");
-
-  if (confirmCancelBtn) {
-    confirmCancelBtn.addEventListener(
-      "click",
-      cancelDelete
-    );
-  }
-
-
-  /*
-     Search
-  */
-
-  const searchInput =
-    $("searchInput");
-
-  if (searchInput) {
-
-    searchInput.addEventListener(
-      "input",
-      event => {
-        performSearch(
-          event.target.value
-        );
-      }
-    );
-
-    searchInput.addEventListener(
-      "keydown",
-      event => {
-        if (
-          event.key === "Enter"
-        ) {
-          event.preventDefault();
-
-          showSearchMatches();
-        }
-
-        if (
-          event.key === "Escape"
-        ) {
-          clearSearch();
-        }
-      }
-    );
-  }
-
-
-  /*
-     Search clear
-  */
-
-  const searchClear =
-    $("searchClearBtn");
-
-  if (searchClear) {
-    searchClear.addEventListener(
-      "click",
-      clearSearch
-    );
-  }
-
-
-  /*
-     Router list search
-  */
-
-  const listSearch =
-    $("listSearchInput");
-
-  if (listSearch) {
-    listSearch.addEventListener(
-      "input",
-      event => {
-        renderRouterList(
-          event.target.value
-        );
-      }
-    );
-  }
-
-
-  /*
-     Search matches close
-  */
-
-  const closeMatches =
-    $("closeSearchMatchesBtn");
-
-  if (closeMatches) {
-    closeMatches.addEventListener(
-      "click",
-      () => {
-        $("searchMatchesOverlay")
-          .classList.add("hidden");
-      }
-    );
-  }
-
-
-  /*
-     Export
-  */
-
-  const exportBtn =
-    $("exportBtn");
-
-  if (exportBtn) {
-    exportBtn.addEventListener(
-      "click",
-      exportData
-    );
-  }
-
-
-  /*
-     Import
-  */
-
-  const importBtn =
-    $("importBtn");
+  // ============================================================
+  // IMPORT
+  // ============================================================
 
   const importFile =
-    $("importFile");
+    document.getElementById("importFile");
 
-  if (
-    importBtn &&
-    importFile
-  ) {
-    importBtn.addEventListener(
-      "click",
-      () => {
-        importFile.value = "";
-        importFile.click();
+  document
+    .getElementById("importBtn")
+    .addEventListener("click", function () {
+      importFile.value = "";
+
+      importFile.click();
+    });
+
+  importFile.addEventListener(
+    "change",
+    function () {
+      const file =
+        importFile.files[0];
+
+      if (!file) {
+        return;
       }
-    );
 
-    importFile.addEventListener(
-      "change",
-      event => {
-        const file =
-          event.target.files &&
-          event.target.files[0];
+      const reader =
+        new FileReader();
 
-        importDataFile(file);
+      reader.onload = async function () {
+        let data;
+
+        try {
+          data = JSON.parse(
+            reader.result
+          );
+        } catch (error) {
+          showToast(
+            "That file isn't valid JSON."
+          );
+
+          return;
+        }
+
+        const validation =
+          validateRouters(data);
+
+        if (!validation.ok) {
+          showToast(
+            "Import failed: " +
+              validation.error
+          );
+
+          return;
+        }
+
+        const merge =
+          window.confirm(
+            "Merge with your existing " +
+              routers.length +
+              " router(s)?\n\n" +
+              "OK = Merge (matching IDs will be updated)\n" +
+              "Cancel = Replace all existing routers"
+          );
+
+        let importedRouters;
+
+        if (merge) {
+          importedRouters = routers.slice();
+
+          validation.routers.forEach(
+            function (newRouter) {
+              const index =
+                importedRouters.findIndex(
+                  function (r) {
+                    return (
+                      r.id ===
+                      newRouter.id
+                    );
+                  }
+                );
+
+              if (index >= 0) {
+                importedRouters[index] =
+                  newRouter;
+              } else {
+                importedRouters.push(
+                  newRouter
+                );
+              }
+            }
+          );
+        } else {
+          importedRouters =
+            validation.routers;
+        }
+
+        try {
+          showToast(
+            "Saving imported routers…"
+          );
+
+          await upsertRoutersToSupabase(
+            importedRouters
+          );
+
+          routers =
+            importedRouters;
+
+          saveLocalRouters();
+
+          renderAll();
+
+          closeSheet(
+            document.getElementById(
+              "settingsSheet"
+            )
+          );
+
+          showToast(
+            "Imported " +
+              validation.routers.length +
+              " router(s)."
+          );
+        } catch (error) {
+          console.error(
+            "Import Supabase error:",
+            error
+          );
+
+          showToast(
+            "Import failed: " +
+              error.message
+          );
+        }
+      };
+
+      reader.readAsText(file);
+    });
+
+  function validateRouters(data) {
+    if (!Array.isArray(data)) {
+      return {
+        ok: false,
+        error:
+          "expected a JSON array of routers."
+      };
+    }
+
+    const cleaned = [];
+
+    const seenIds = {};
+
+    for (let i = 0; i < data.length; i++) {
+      const router = data[i];
+
+      if (
+        !router ||
+        typeof router !== "object"
+      ) {
+        return {
+          ok: false,
+          error:
+            "item " +
+            i +
+            " is not an object."
+        };
       }
-    );
+
+      if (
+        typeof router.id !== "string" ||
+        !router.id.trim()
+      ) {
+        return {
+          ok: false,
+          error:
+            "item " +
+            i +
+            " is missing a valid id."
+        };
+      }
+
+      if (
+        typeof router.model !==
+          "string" ||
+        !router.model.trim()
+      ) {
+        return {
+          ok: false,
+          error:
+            'router "' +
+            router.id +
+            '" is missing a model.'
+        };
+      }
+
+      const lat =
+        Number(router.lat);
+
+      const lng =
+        Number(router.lng);
+
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng)
+      ) {
+        return {
+          ok: false,
+          error:
+            'router "' +
+            router.id +
+            '" has invalid latitude/longitude.'
+        };
+      }
+
+      const id =
+        router.id.trim();
+
+      if (seenIds[id]) {
+        return {
+          ok: false,
+          error:
+            'duplicate router id "' +
+            id +
+            '" in file.'
+        };
+      }
+
+      seenIds[id] = true;
+
+      cleaned.push({
+        id: id,
+
+        model: router.model.trim(),
+
+        lat: lat,
+
+        lng: lng,
+
+        status: STATUS[router.status]
+          ? router.status
+          : "active",
+
+        notes:
+          typeof router.notes ===
+          "string"
+            ? router.notes.trim()
+            : ""
+      });
+    }
+
+    return {
+      ok: true,
+      routers: cleaned
+    };
   }
 
+  // ============================================================
+  // USE MY LOCATION
+  // ============================================================
 
-  /*
-     ID / model / notes fields
-     update save button.
-  */
-
-  [
-    "fieldId",
-    "fieldModel",
-    "fieldNotes"
-  ].forEach(id => {
-    const field = $(id);
-
-    if (!field) return;
-
-    field.addEventListener(
-      "input",
-      updateSaveButton
-    );
-  });
-
-
-  /*
-     Escape key
-  */
-
-  document.addEventListener(
-    "keydown",
-    event => {
-      if (
-        event.key !== "Escape"
-      ) {
-        return;
-      }
-
-      if (placingMode) {
-        cancelMapPlacement();
-        return;
-      }
-
-      const confirmOverlay =
-        $("confirmOverlay");
-
-      if (
-        confirmOverlay &&
-        !confirmOverlay.classList.contains(
-          "hidden"
-        )
-      ) {
-        cancelDelete();
-        return;
-      }
-
-      const searchOverlay =
-        $("searchMatchesOverlay");
-
-      if (
-        searchOverlay &&
-        !searchOverlay.classList.contains(
-          "hidden"
-        )
-      ) {
-        searchOverlay.classList.add(
-          "hidden"
+  document
+    .getElementById("locateFab")
+    .addEventListener("click", function () {
+      if (!navigator.geolocation) {
+        showToast(
+          "Geolocation isn't supported by this browser."
         );
 
         return;
       }
 
-      closeSheets();
+      showToast("Locating…");
 
-      setActiveNav("map");
-    }
-  );
-}
+      navigator.geolocation.getCurrentPosition(
+        function (position) {
+          const lat =
+            position.coords.latitude;
 
+          const lng =
+            position.coords.longitude;
 
-/* =========================================================
-   51. TOUCH / MAP RESIZE
-   ========================================================= */
+          map.setView(
+            [lat, lng],
+            16
+          );
 
-function setupMapResizeHandling() {
-  if (!map) {
-    return;
+          L.circleMarker(
+            [lat, lng],
+            {
+              radius: 8,
+
+              color: "#3fb6a8",
+
+              fillColor: "#3fb6a8",
+
+              fillOpacity: 0.5
+            }
+          ).addTo(map);
+
+          showToast(
+            "Centered on your location."
+          );
+        },
+
+        function (error) {
+          console.error(
+            "Location error:",
+            error
+          );
+
+          showToast(
+            "Couldn't get your location. Check location permissions."
+          );
+        },
+
+        {
+          enableHighAccuracy: true,
+
+          timeout: 10000,
+
+          maximumAge: 0
+        }
+      );
+    });
+
+  // ============================================================
+  // TOAST
+  // ============================================================
+
+  let toastTimer = null;
+
+  function showToast(message) {
+    const toast =
+      document.getElementById("toast");
+
+    toast.textContent = message;
+
+    toast.classList.remove("hidden");
+
+    clearTimeout(toastTimer);
+
+    toastTimer = setTimeout(
+      function () {
+        toast.classList.add(
+          "hidden"
+        );
+      },
+      3500
+    );
   }
 
-  window.addEventListener(
-    "resize",
-    () => {
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 150);
-    }
-  );
+  // ============================================================
+  // DATABASE CONNECTION STATUS
+  // ============================================================
 
-  /*
-     Some mobile browsers change the viewport
-     after the address bar disappears.
-  */
-
-  window.addEventListener(
-    "orientationchange",
-    () => {
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 400);
-    }
-  );
-}
-
-
-/* =========================================================
-   52. SUPABASE CONNECTION TEST
-   ========================================================= */
-
-async function testSupabaseConnection() {
-  if (!supabaseClient) {
-    return false;
-  }
-
-  try {
-    const {
-      error
-    } = await supabaseClient
-      .from("routers")
-      .select("id")
-      .limit(1);
-
-    if (error) {
+  async function initializeDatabase() {
+    if (!supabaseClient) {
       console.error(
-        "Supabase connection test failed:",
-        error
+        "Supabase JavaScript library is not loaded."
+      );
+
+      showToast(
+        "Database unavailable. Using local backup."
       );
 
       return false;
     }
 
-    return true;
+    try {
+      const cloudRouters =
+        await loadRoutersFromSupabase();
 
-  } catch (error) {
-    console.error(
-      "Supabase connection test failed:",
-      error
-    );
+      routers = cloudRouters;
 
-    return false;
-  }
-}
-
-
-/* =========================================================
-   53. DATABASE STATUS INDICATOR
-   ========================================================= */
-
-function showDatabaseStatus(connected) {
-  if (connected) {
-    console.log(
-      "✅ Supabase database connected."
-    );
-  } else {
-    console.warn(
-      "⚠️ Supabase database is unavailable."
-    );
-  }
-}
-
-
-/* =========================================================
-   54. START APPLICATION
-   ========================================================= */
-
-async function initApp() {
-  console.log(
-    "Starting Hotspot Router Map..."
-  );
-
-  if (!supabaseClient) {
-    console.error(
-      "Supabase JavaScript library was not loaded."
-    );
-
-    showToast(
-      "Supabase library failed to load.",
-      5000
-    );
-  }
-
-  /*
-     Initialize map first so the user sees
-     something immediately.
-  */
-
-  initMap();
-
-  setupEventListeners();
-
-  setupMapResizeHandling();
-
-  /*
-     Render empty state immediately.
-  */
-
-  renderAll();
-
-  /*
-     Test database.
-  */
-
-  const connected =
-    await testSupabaseConnection();
-
-  showDatabaseStatus(
-    connected
-  );
-
-  if (!connected) {
-    /*
-       Try to load local backup.
-    */
-
-    const localRouters =
-      getLocalRouters();
-
-    if (localRouters.length) {
-      routers =
-        localRouters
-          .map(normalizeRouter)
-          .filter(Boolean);
+      saveLocalRouters();
 
       renderAll();
 
-      showToast(
-        "Database unavailable. Using local backup.",
-        5000
+      console.log(
+        "Supabase connected successfully."
       );
-    } else {
-      showToast(
-        "Unable to connect to database.",
-        5000
-      );
-    }
 
-    return;
+      console.log(
+        "Routers loaded:",
+        routers.length
+      );
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Supabase connection error:",
+        error
+      );
+
+      /*
+       * If the database cannot be reached,
+       * keep whatever is stored locally.
+       */
+      showToast(
+        "Database unavailable. Using local backup."
+      );
+
+      renderAll();
+
+      return false;
+    }
   }
 
-  /*
-     Load the actual Supabase data.
-  */
+  // ============================================================
+  // INITIAL RENDER
+  // ============================================================
 
-  await loadApplicationData();
+  renderAll();
 
-  /*
-     If routers exist, show them.
-  */
+  // ============================================================
+  // INITIAL MAP VIEW
+  // ============================================================
 
-  if (routers.length) {
-    setTimeout(() => {
-      fitMapToRouters();
-    }, 200);
+  if (routers.length > 1) {
+    const bounds =
+      L.latLngBounds(
+        routers.map(function (router) {
+          return [
+            router.lat,
+            router.lng
+          ];
+        })
+      );
+
+    map.fitBounds(
+      bounds,
+      {
+        padding: [60, 60]
+      }
+    );
   }
 
-  /*
-     Make sure Leaflet recalculates its size
-     after the page finishes loading.
-  */
+  // ============================================================
+  // LOAD FROM SUPABASE
+  // ============================================================
 
-  setTimeout(() => {
-    if (map) {
-      map.invalidateSize();
-    }
-  }, 500);
-}
+  initializeDatabase();
 
-
-/* =========================================================
-   55. START WHEN PAGE IS READY
-   ========================================================= */
-
-if (
-  document.readyState === "loading"
-) {
-  document.addEventListener(
-    "DOMContentLoaded",
-    initApp
-  );
-} else {
-  initApp();
-}
+})();
